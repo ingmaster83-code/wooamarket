@@ -34,14 +34,23 @@ for d in DAYS:
         add(ITEM, ik, d, n, u, am, mn, mx); add(SC, (lc, mc, sc), d, n, u, am, mn, mx)
         add(MKT, mk, d, n, u, am, mn, mx); add(MI, (mk, lc, mc), d, n, u, am, mn, mx)
 for ik in ITEM: ITEMBYMC[(ik[1], NM[("i", ik)])].append(ik)
-SIDO_OK = re.compile(r"(특별시|광역시|특별자치시|특별자치도|도|시)$")
+SIDO_FULL = {"경기": "경기도", "경남": "경상남도", "경북": "경상북도", "충남": "충청남도", "충북": "충청북도", "서울": "서울특별시", "부산": "부산광역시", "대구": "대구광역시", "대전": "대전광역시", "인천": "인천광역시", "울산": "울산광역시", "광주": "광주광역시", "세종": "세종특별자치시", "강원": "강원특별자치도", "전북": "전북특별자치도", "제주": "제주특별자치도"}
+DOMESTIC = set(SIDO_FULL.values()) | {"전남광주통합특별시"}
+ETC = "기타·수입"
+COUNTRY_FIX = {"카나다": "캐나다", "에쿠아도르": "에콰도르", "우즈베크": "우즈베키스탄", "남아프리카": "남아프리카공화국"}
+def norm_origin(s):
+    s = SIDO_FULL.get(s, s)
+    if s in DOMESTIC: return s
+    if s in ("-", "", "수입산", "한국", "마이너"): return ETC
+    return COUNTRY_FIX.get(s, s)
+def is_imp(s): return s not in DOMESTIC and s != ETC
 ORI, SIDO = new_series(), new_series()
 for d in DAYS:
     for o in RAW[d]["origin"]:
         mc, mcn, unit, sido, n, u, am = o
         if unit != "kg" or not ITEMBYMC.get((mc, mcn)): continue
         ik = max(ITEMBYMC[(mc, mcn)], key=lambda k: sum(r[1] for r in ITEM[k].values()))
-        sido = sido if SIDO_OK.search(sido) else "기타·수입"
+        sido = norm_origin(sido)
         add(ORI, (ik, sido), d, n, u, am, 0, 0); add(SIDO, (sido, ik), d, n, u, am, 0, 0)
 
 # ───────────────────────── 도우미 ─────────────────────────
@@ -127,6 +136,8 @@ for k in ITEMS: CATS[k[0]].append(k)
 CPATH = {c: "/category/%s/" % sl(NM[("l", c)]) for c in CATS}
 SIDOS = sorted({k[0] for k in SIDO})
 SDPATH = {s: "/origin/%s/" % sl(s) for s in SIDOS}
+OIS = {k: info(v) for k, v in ORI.items() if k[0] in ITEMS and k[1] != ETC and tot_trades(v) >= 30 and len(v) >= 5 and sum(r[1] for r in v.values()) >= 3000}
+OIPATH = {k: SDPATH[k[1]] + IPATH[k[0]].split("/")[2] + "/" for k in OIS}
 def iname(k): return NM[("i", k)]
 def mname(k): return NM[("m", k)]
 def ilink(k, t=None): return '<a href="%s">%s</a>' % (IPATH[k], esc(t or iname(k)))
@@ -170,7 +181,7 @@ def page_item(ik):
         lead += " 시장별로는 %s(kg당 %s)이(가) 가장 낮고 %s(kg당 %s)이(가) 가장 높았습니다." % (esc(mname(ch[0])), kw(pxr(ch[1])), esc(mname(ex[0])), kw(pxr(ex[1])))
     st = stats_row([("평균 낙찰가(kg)", kw(I["px"])), ("전 경매일 대비", pcts(I["d1"])), ("7경매일 평균 대비", pcts(I["d7"])), ("거래량", ton(I["cur"][1])), ("%d경매일 일평균 최저~최고" % I["n"], "%s~%s" % ("{:,}".format(int(round(I["lo"]))), "{:,}".format(int(round(I["hi"])))))])
     mt = table(["도매시장", "평균 낙찰가(kg)", "거래량", "거래 건수"], [[(('<a href="%s">%s</a>' % (MIPATH[(mk,) + ik], esc(mname(mk)))) if (mk,) + ik in MIPATH else esc(mname(mk))), kw(pxr(r)), ton(r[1]), "{:,}".format(r[0])] for mk, r in mrows], (1, 2, 3)) if mrows else ""
-    ot = table(["산지(시·도)", "평균 낙찰가(kg)", "거래량(최근 7경매일)"], [[esc(s), kw(pxr(r)), ton(r[1])] for s, r in orows], (1, 2)) if orows else ""
+    ot = table(["산지(시·도)", "평균 낙찰가(kg)", "거래량(최근 7경매일)"], [[('<a href="%s">%s</a>' % (OIPATH[(ik, s)], esc(s))) if (ik, s) in OIPATH else esc(s), kw(pxr(r)), ton(r[1])] for s, r in orows], (1, 2)) if orows else ""
     vr = sorted([(k, v) for k, v in SCS.items() if k[:2] == ik], key=lambda x: -x[1]["cur"][1])
     vt = table(["품종·규격", "평균 낙찰가(kg)", "전 경매일 대비", "거래량"], [[('<a href="%s">%s</a>' % (SCPATH[k], esc(NM[("s", k)]))), kw(v["px"]), pcts(v["d1"]), ton(v["cur"][1])] for k, v in vr[:30]], (1, 2, 3)) if vr else ""
     sib = [k for k in sorted(CATS[ik[0]], key=lambda k: -ITEMS[k]["cur"][1]) if k != ik][:14]
@@ -333,16 +344,40 @@ def page_sido(s):
     rows.sort(key=lambda x: -x[1][1]); path = SDPATH[s]
     if not rows: return
     tot = sum(r[1] for _, r in rows)
-    lead = "<b>%s</b>에서 올라온 농수산물은 최근 7경매일 동안 %d개 품목, 총 %s가 전국 공영도매시장에서 경매되었습니다. 반입량이 가장 많은 품목은 %s(%s)입니다." % (esc(s), len(rows), ton(tot), esc(iname(rows[0][0])), ton(rows[0][1][1]))
+    imp = is_imp(s); kind = "수입산" if imp else "산지"
+    lead = ("<b>%s</b>산 수입 농수산물은 최근 7경매일 동안 %d개 품목, 총 %s가 전국 공영도매시장에서 경매되었습니다. 반입량이 가장 많은 품목은 %s(%s)입니다." if imp else "<b>%s</b>에서 올라온 농수산물은 최근 7경매일 동안 %d개 품목, 총 %s가 전국 공영도매시장에서 경매되었습니다. 반입량이 가장 많은 품목은 %s(%s)입니다.") % (esc(s), len(rows), ton(tot), esc(iname(rows[0][0])), ton(rows[0][1][1]))
     body = f"""
-<div class="page-head"><h1>{esc(s)} 산지 농산물 도매 시세 — 품목별 낙찰가</h1><p>최근 7경매일 · {ASOF_NOTE}</p></div>
+<div class="page-head"><h1>{esc(s)}{"산 수입 농수산물" if imp else " 산지 농산물"} 도매 시세 — 품목별 낙찰가</h1><p>최근 7경매일 · {ASOF_NOTE}</p></div>
 <p class="lead">{lead}</p>
 {ad()}
-{table(['품목', '평균 낙찰가(kg)', '반입 거래량'], [[ilink(k), kw(pxr(r)), ton(r[1])] for k, r in rows[:80]], (1, 2))}
-<p class="note">{NOTE} 산지는 경매 출하지의 시·도 단위입니다.</p>
+{table(['품목', '평균 낙찰가(kg)', '반입 거래량'], [[('<a href="%s">%s</a>' % (OIPATH[(k, s)], esc(iname(k)))) if (k, s) in OIPATH else ilink(k), kw(pxr(r)), ton(r[1])] for k, r in rows[:80]], (1, 2))}
+<p class="note">{NOTE} {"수입산은 원산지 국가 단위입니다." if imp else "산지는 경매 출하지의 시·도 단위입니다."}</p>
 {chips([("산지 전체", "/origin/"), ("품목별 시세", "/item/")])}
 """
-    write(path, layout(path, "%s 산지 농산물 도매 시세 — 품목별 반입량·낙찰가" % s, "%s에서 출하된 농수산물의 도매시장 경매 낙찰가와 반입량(최근 7경매일, %d개 품목)." % (s, len(rows)), body, [("%s 농산물 중 반입량이 가장 많은 품목은?" % s, "최근 7경매일 기준 %s입니다." % ", ".join(iname(k) for k, _ in rows[:3]))], [("홈", "/"), ("산지별", "/origin/"), (s, path)]), "0.6")
+    write(path, layout(path, ("%s산 수입 농수산물 도매 시세 — 품목별 반입량·낙찰가" if imp else "%s 산지 농산물 도매 시세 — 품목별 반입량·낙찰가") % s, ("%s산 수입 농수산물의 도매시장 경매 낙찰가와 반입량(최근 7경매일, %d개 품목)." if imp else "%s에서 출하된 농수산물의 도매시장 경매 낙찰가와 반입량(최근 7경매일, %d개 품목).") % (s, len(rows)), body, [("%s 농산물 중 반입량이 가장 많은 품목은?" % s, "최근 7경매일 기준 %s입니다." % ", ".join(iname(k) for k, _ in rows[:3]))], [("홈", "/"), ("산지별", "/origin/"), (s, path)]), "0.6")
+def page_oi(k):
+    I = OIS[k]; ik, s = k; ser = ORI[k]; path = OIPATH[k]; ld = I["ld"]; nat = ITEMS[ik]; imp = is_imp(s)
+    natp = pxr(ITEM[ik].get(ld)); diff = pct(I["px"], natp)
+    lead = "<b>%s</b> <b>%s</b>의 %s 도매시장 평균 낙찰가는 <b>kg당 %s</b>이고 반입량은 %s(%s건)입니다." % (esc(s), esc(iname(ik)), kd(ld), kw(I["px"]), ton(I["cur"][1]), "{:,}".format(I["cur"][0]))
+    if diff is not None and natp: lead += " 같은 날 전국 평균(%s)보다 %s." % (kw(natp), "비슷합니다" if abs(diff) < 0.05 else ("%.1f%% %s" % (abs(diff), "높습니다" if diff > 0 else "낮습니다")))
+    if I["d1"] is not None: lead += " 이 산지 직전 경매일(%s)보다 %s." % (kd(I["ds"][-2]), move(I["d1"]))
+    others = [(sd, r) for sd, r in origin_rows(ik, [ld], 30) if sd != s and sd != ETC and r[1] >= 200][:12]
+    ot = table(["산지", "평균 낙찰가(kg)", "반입량"], [[(('<a href="%s">%s</a>' % (OIPATH[(ik, sd)], esc(sd))) if (ik, sd) in OIPATH else esc(sd)), kw(pxr(r)), ton(r[1])] for sd, r in others], (1, 2)) if others else ""
+    body = f"""
+<div class="page-head"><h1>{esc(s)} {esc(iname(ik))} 도매시세 — kg당 {kw(I['px'])}</h1><p>{kd(ld)} 경매 기준 · {'수입산' if imp else '산지별'} 도매시장 낙찰가</p></div>
+<p class="lead">{lead}</p>
+{stats_row([("평균 낙찰가(kg)", kw(I["px"])), ("전 경매일 대비", pcts(I["d1"])), ("전국 평균 대비", pcts(diff)), ("반입량", ton(I["cur"][1]))])}
+{ad()}
+<h2 class="group-title">📈 {esc(s)} {esc(iname(ik))} 일별 평균 낙찰가 추이</h2>
+{spark(ser, DAYS)}
+{trend_table(ser, DAYS)}
+{('<h2 class="group-title">🚚 다른 산지와 비교 <small>%s</small></h2>' % kd(ld) + ot) if ot else ''}
+<p class="note">{NOTE} {"수입산은 원산지 국가 단위입니다." if imp else "산지는 경매 출하지의 시·도 단위입니다."}</p>
+{chips([("%s 전국 시세" % iname(ik), IPATH[ik]), ("%s 품목별 시세" % s, SDPATH[s]), ("산지별 전체", "/origin/")])}
+"""
+    fq = [("%s %s 도매가는 얼마인가요?" % (s, iname(ik)), "%s 경매 기준 %s 평균 낙찰가는 kg당 %s이며 전국 평균은 %s입니다." % (kd(ld), s, kw(I["px"]), kw(natp))), ("도매 낙찰가와 마트 가격은 왜 다른가요?", "도매 낙찰가는 경매 확정 가격이며 소매가에는 유통·운송·포장 비용과 소매 마진이 더해집니다.")]
+    write(path, layout(path, "%s %s 도매시세 — kg당 %s (%s)" % (s, iname(ik), kw(I["px"]), kd(ld)), "%s %s 도매시장 경매 낙찰가 kg당 %s (%s). 전국 평균 대비·다른 산지 비교·일별 추이." % (s, iname(ik), kw(I["px"]), kd(ld)), body, fq, [("홈", "/"), ("산지별", "/origin/"), (s, SDPATH[s]), (iname(ik), path)]), "0.6")
+
 def hub_origin():
     r7 = DAYS[-7:]; agg = collections.defaultdict(lambda: [0, 0.0])
     for (sd, ik), ser in SIDO.items():
@@ -353,7 +388,10 @@ def hub_origin():
 <div class="page-head"><h1>산지별 농산물 도매시장 반입 현황</h1><p>최근 7경매일 · {ASOF_NOTE}</p></div>
 <p class="lead">도매시장 경매에 출하된 농수산물을 산지(시·도)별로 모아 어떤 지역에서 어떤 품목이 많이 올라오는지 보여줍니다.</p>
 {ad()}
-{table(['산지', '품목 수', '반입 거래량'], [['<a href="%s">%s</a>' % (SDPATH[s], esc(s)), agg[s][0], ton(agg[s][1])] for s in ss], (1, 2))}
+<h2 class="group-title">🇰🇷 국내 산지(시·도)</h2>
+{table(['산지', '품목 수', '반입 거래량'], [['<a href="%s">%s</a>' % (SDPATH[s], esc(s)), agg[s][0], ton(agg[s][1])] for s in ss if not is_imp(s) and s != ETC], (1, 2))}
+<h2 class="group-title">🌏 수입산(원산지 국가)</h2>
+{table(['원산지', '품목 수', '반입 거래량'], [['<a href="%s">%s</a>' % (SDPATH[s], esc(s)), agg[s][0], ton(agg[s][1])] for s in ss if is_imp(s)], (1, 2))}
 <p class="note">{NOTE}</p>
 """
     write("/origin/", layout("/origin/", "산지별 농산물 도매시장 반입 현황 — 시·도별 출하 품목", "경북·전남·강원 등 산지(시·도)별 도매시장 출하 품목과 낙찰가.", body, None, [("홈", "/"), ("산지별", "/origin/")]), "0.6")
@@ -482,6 +520,7 @@ def main():
     for k in MIS: page_mi(k)
     for c in CATS: page_cat(c)
     for s in SIDOS: page_sido(s)
+    for k in OIS: page_oi(k)
     hub_market(); hub_cat(); hub_item(); hub_origin(); ranks()
     page_home(); page_about(); page_privacy()
     urls = "".join("<url><loc>%s%s</loc><lastmod>%s</lastmod><priority>%s</priority></url>" % (BASE, q(p), ASOF, pr_) for p, pr_ in WRITTEN)
