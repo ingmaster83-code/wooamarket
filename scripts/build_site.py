@@ -168,6 +168,10 @@ def market_rows(ik, day):
     rows.sort(key=lambda x: pxr(x[1]))
     return rows
 
+# 다른 우아 사이트 연결: 전통시장·5일장(우아시장), 착한가격업소(우아착한가격)
+XL_ITEM = [("🛒 가까운 전통시장·5일장 찾기", "https://wooasijang.wooahouse.com/"), ("💰 우리 동네 착한가격업소", "https://wooaprice.wooahouse.com/")]
+
+
 def page_item(ik):
     I = ITEMS[ik]; nm = iname(ik); ser = ITEM[ik]; path = IPATH[ik]; ld = I["ld"]; lcn = NM[("l", ik[0])]
     mrows = market_rows(ik, ld); orows = origin_rows(ik)
@@ -197,7 +201,7 @@ def page_item(ik):
 {('<h2 class="group-title">🚚 산지별 낙찰가</h2>' + ot) if ot else ''}
 {('<h2 class="group-title">🏷️ 품종·규격별 시세</h2>' + vt) if vt else ''}
 <p class="note">{NOTE}</p>
-{chips([(esc(NM[("l", ik[0])]) + " 전체", CPATH[ik[0]]), ("가격 순위", "/rank/"), ("도매시장 전체", "/market/")] + [(iname(k), IPATH[k]) for k in sib])}
+{chips([(esc(NM[("l", ik[0])]) + " 전체", CPATH[ik[0]]), ("가격 순위", "/rank/"), ("도매시장 전체", "/market/")] + [(iname(k), IPATH[k]) for k in sib] + XL_ITEM)}
 """
     fq = [("%s 도매가는 지금 얼마인가요?" % nm, "%s 경매 기준 전국 공영도매시장 평균 낙찰가는 kg당 %s입니다." % (kd(ld), kw(I["px"])) + ((" 직전 경매일보다 %s." % move(I["d1"])) if I["d1"] is not None else ""))]
     if ch and ex and len(cheap) >= 2: fq.append(("%s는 어느 도매시장이 가장 싼가요?" % nm, "%s 거래량 200kg 이상 시장 중에서는 %s(kg당 %s)이(가) 가장 낮았고 %s(kg당 %s)이(가) 가장 높았습니다. 시장별 품질·등급 구성이 달라 단순 비교는 어렵습니다." % (kd(ld), mname(ch[0]), kw(pxr(ch[1])), mname(ex[0]), kw(pxr(ex[1])))))
